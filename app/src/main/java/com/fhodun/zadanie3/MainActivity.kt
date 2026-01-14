@@ -12,15 +12,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
-import com.fhodun.zadanie3.ui.theme.Zadanie3Theme
+import com.fhodun.zadanie3.ui.main.MainScreen
 
 class MainActivity : ComponentActivity() {
 
@@ -44,34 +39,27 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            Zadanie3Theme {
-                val url by viewModel.url.collectAsState()
-                val typeLabel by viewModel.typeLabel.collectAsState()
-                val sizeLabel by viewModel.sizeLabel.collectAsState()
-                val progressInfo by viewModel.progressInfo.collectAsState()
+            val state by viewModel.uiState.collectAsState()
 
-                MainScreen(
-                    url = url,
-                    typeLabel = typeLabel,
-                    sizeLabel = sizeLabel,
-                    progressInfo = progressInfo,
-                    onUrlChange = { viewModel.setUrl(it) },
-                    onGetInfoClick = {
-                        if (url.isBlank()) {
-                            Toast.makeText(this, "Podaj URL", Toast.LENGTH_SHORT).show()
-                        } else {
-                            viewModel.fetchFileInfo(url)
-                        }
-                    },
-                    onDownloadClick = {
-                        if (url.isBlank()) {
-                            Toast.makeText(this, "Podaj URL", Toast.LENGTH_SHORT).show()
-                        } else {
-                            checkNotifPermissionAndStart(url)
-                        }
+            MainScreen(
+                state = state,
+                onUrlChange = viewModel::setUrl,
+                onGetInfoClick = {
+                    if (state.url.isBlank()) {
+                        Toast.makeText(this, "Podaj URL", Toast.LENGTH_SHORT).show()
+                    } else {
+                        viewModel.fetchFileInfo()
                     }
-                )
-            }
+                },
+                onDownloadClick = {
+                    val url = state.url
+                    if (url.isBlank()) {
+                        Toast.makeText(this, "Podaj URL", Toast.LENGTH_SHORT).show()
+                    } else {
+                        checkNotifPermissionAndStart(url)
+                    }
+                }
+            )
         }
     }
 
@@ -100,129 +88,13 @@ class MainActivity : ComponentActivity() {
             .putExtra(DownloadService.EXTRA_URL, url)
 
         try {
-            Log.d(TAG, "Startuję DownloadService (foreground=${
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-            })")
+            Log.d(TAG, "Startuję DownloadService")
             Toast.makeText(this, "Start pobierania…", Toast.LENGTH_SHORT).show()
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
-            }
+            startForegroundService(intent)
         } catch (t: Throwable) {
             Log.e(TAG, "Nie udało się uruchomić DownloadService", t)
             Toast.makeText(this, "Nie udało się uruchomić pobierania: ${t::class.java.simpleName}", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    @Composable
-    fun MainScreen(
-        url: String,
-        typeLabel: String,
-        sizeLabel: String,
-        progressInfo: PostepInfo?,
-        onUrlChange: (String) -> Unit,
-        onGetInfoClick: () -> Unit,
-        onDownloadClick: () -> Unit
-    ) {
-        var urlText by remember(url) {
-            mutableStateOf(TextFieldValue(url))
-        }
-
-        val size = progressInfo?.mRozmiar?.takeIf { it > 0 } ?: 0
-        val downloaded = progressInfo?.mPobranychBajtow ?: 0
-        val progressLabel = "Postęp: $downloaded / $size"
-        val progressValue = if (size > 0) {
-            ((downloaded.toDouble() / size.toDouble()) * 100).toInt().coerceIn(0, 100)
-        } else 0
-
-        Scaffold { paddingValues ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(text = "Zadanie 3 – Pobieranie pliku (Compose)")
-
-                OutlinedTextField(
-                    value = urlText,
-                    onValueChange = {
-                        urlText = it
-                        onUrlChange(it.text)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Adres URL") }
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        modifier = Modifier.weight(1f),
-                        onClick = { onGetInfoClick() }
-                    ) {
-                        Text("Pobierz informacje")
-                    }
-
-                    Button(
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            val current = urlText.text
-                            onUrlChange(current)
-                            if (current.isBlank()) {
-                                Toast.makeText(this@MainActivity, "Podaj URL", Toast.LENGTH_SHORT).show()
-                            } else {
-                                checkNotifPermissionAndStart(current)
-                            }
-                        }
-                    ) {
-                        Text("Pobierz plik")
-                    }
-                }
-
-                Text(text = typeLabel)
-                Text(text = sizeLabel)
-
-                when (progressInfo?.mStatus) {
-                    PostepInfo.STATUS_ERROR -> {
-                        Text(text = "Błąd pobierania")
-                        progressInfo.mBlad?.takeIf { it.isNotBlank() }?.let {
-                            Text(text = it)
-                        }
-                    }
-                    PostepInfo.STATUS_DONE -> {
-                        Text(text = "Pobieranie zakończone")
-                        progressInfo.mPlikSciezka?.let {
-                            Text(text = "Zapisano: $it")
-                        }
-                    }
-                    else -> {
-                        Text(text = progressLabel)
-                        progressInfo?.mPlikSciezka?.let {
-                            Text(text = "Docelowo: $it", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-
-                LinearProgressIndicator(
-                    progress = (progressValue / 100f).coerceIn(0f, 1f),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                )
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                Text(
-                    text = "AsyncTaska świadomie zakopaliśmy. I tak nikt normalny go już nie używa.",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
-                )
-            }
         }
     }
 }

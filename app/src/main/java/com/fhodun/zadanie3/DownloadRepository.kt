@@ -1,23 +1,17 @@
 package com.fhodun.zadanie3
 
-import kotlinx.coroutines.flow.MutableStateFlow
+import com.fhodun.zadanie3.data.repository.DownloadProgressRepository
+import com.fhodun.zadanie3.domain.model.DownloadProgress
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 
-/**
- * Prosty singleton na postęp pobierania.
- * Dzięki temu UI może obserwować stan przez ViewModel i nie traci go przy rotacji.
- */
 object DownloadRepository {
-    private val _progress = MutableStateFlow<PostepInfo?>(null)
-    val progress: StateFlow<PostepInfo?> = _progress.asStateFlow()
+    val progress: StateFlow<DownloadProgress?> = DownloadProgressRepository.progress
 
-    fun emitProgress(info: PostepInfo) {
-        _progress.value = info
+    fun emitProgress(info: DownloadProgress) {
+        DownloadProgressRepository.emitProgress(info)
     }
 
     fun reset() {
-        _progress.value = null
+        DownloadProgressRepository.reset()
     }
 }
-

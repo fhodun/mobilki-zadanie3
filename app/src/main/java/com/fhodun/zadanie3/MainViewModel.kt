@@ -3,11 +3,15 @@ package com.fhodun.zadanie3
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.fhodun.zadanie3.data.repository.DownloadProgressRepository
+import com.fhodun.zadanie3.domain.model.DownloadProgress
+import com.fhodun.zadanie3.domain.model.FileInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.net.HttpURLConnection
 import java.net.URL
@@ -18,32 +22,44 @@ class MainViewModel : ViewModel() {
         private const val TAG = "MainViewModel"
     }
 
-    // rotacja nie resetuje pola URL
-    private val _url = MutableStateFlow("https://files.catbox.moe/67tta8.gif")
-    val url: StateFlow<String> = _url.asStateFlow()
+    data class UiState(
+        val url: String = "https://i.postimg.cc/MX2rz6Qg/danger-alert.gif",
+        val infoTypeLabel: String = "Typ: -",
+        val infoSizeLabel: String = "Rozmiar: -",
+        val progress: DownloadProgress? = null,
+        val isLoadingInfo: Boolean = false
+    )
 
-    private val _typeLabel = MutableStateFlow("Typ: -")
-    val typeLabel: StateFlow<String> = _typeLabel.asStateFlow()
+    private val _uiState = MutableStateFlow(UiState())
+    val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
-    private val _sizeLabel = MutableStateFlow("Rozmiar: -")
-    val sizeLabel: StateFlow<String> = _sizeLabel.asStateFlow()
-
-    val progressInfo: StateFlow<PostepInfo?> = DownloadRepository.progress
+    val progress: StateFlow<DownloadProgress?> = DownloadProgressRepository.progress
         .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5_000), null)
 
-    fun setUrl(value: String) {
-        _url.value = value
+    init {
+        viewModelScope.launch {
+            progress.collect { p ->
+                _uiState.update { it.copy(progress = p) }
+            }
+        }
     }
 
-    fun fetchFileInfo(urlString: String) {
+    fun setUrl(value: String) {
+        _uiState.update { it.copy(url = value) }
+    }
+
+    fun fetchFileInfo() {
+        val urlString = uiState.value.url
+
         if (urlString.isBlank()) {
-            _typeLabel.value = "Typ: -"
-            _sizeLabel.value = "Rozmiar: -"
+            _uiState.update { it.copy(infoTypeLabel = "Typ: -", infoSizeLabel = "Rozmiar: -") }
             return
         }
 
+        _uiState.update { it.copy(isLoadingInfo = true) }
+
         viewModelScope.launch(Dispatchers.IO) {
-            try {
+            val result = runCatching {
                 val url = URL(urlString)
                 val conn = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
@@ -59,14 +75,30 @@ class MainViewModel : ViewModel() {
 
                 conn.disconnect()
 
-                _typeLabel.value = "Typ: ${type ?: "-"}"
-                _sizeLabel.value = "Rozmiar: ${if (length >= 0) "$length B" else "-"}"
-            } catch (e: Exception) {
-                Log.e(TAG, "Błąd fetchFileInfo", e)
-                _typeLabel.value = "Typ: błąd"
-                _sizeLabel.value = "Rozmiar: błąd"
+                FileInfo(
+                    contentType = type,
+                    contentLengthBytes = if (length >= 0) length else null
+                )
+            }
+
+            if (result.isFailure) {
+                Log.e(TAG, "Błąd fetchFileInfo", result.exceptionOrNull())
+            }
+
+            val info = result.getOrNull()
+
+            _uiState.update {
+                it.copy(
+                    isLoadingInfo = false,
+                    infoTypeLabel = if (info != null) "Typ: ${info.contentType ?: "-"}" else "Typ: błąd",
+                    infoSizeLabel = if (info != null) {
+                        val len = info.contentLengthBytes
+                        "Rozmiar: ${len?.let { "$it B" } ?: "-"}"
+                    } else {
+                        "Rozmiar: błąd"
+                    }
+                )
             }
         }
     }
 }
-

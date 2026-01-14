@@ -8,36 +8,29 @@ import android.app.Service
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
+import com.fhodun.zadanie3.data.downloader.HttpUrlConnectionDownloader
+import com.fhodun.zadanie3.data.repository.DownloadProgressRepository
+import com.fhodun.zadanie3.domain.model.DownloadProgress
+import com.fhodun.zadanie3.domain.model.DownloadStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.io.File
-import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.Locale
 
 class DownloadService : Service() {
-
     companion object {
         private const val CHANNEL_ID = "download_channel"
         private const val NOTIF_ID = 1
         private const val TAG = "DownloadService"
-
         const val EXTRA_URL = "url"
-
-        // UI update throttle (ms) – żeby Compose nie był spamowany tysiącami update'ów.
-        private const val UI_MIN_INTERVAL_MS = 100L
-
-        // Notification update: nie spamuj systemu.
         private const val NOTIF_MIN_INTERVAL_MS = 300L
     }
 
@@ -68,19 +61,37 @@ class DownloadService : Service() {
             buildNotification(progress = 0, total = 0, title = "Rozpoczynam pobieranie", contentIntent = null)
         )
 
+        val downloader = HttpUrlConnectionDownloader(appContext = applicationContext)
+
         serviceScope.launch {
+            var lastNotifAt = 0L
+            var lastNotifPct = -1
+
             try {
-                pobierzPlik(urlString)
+                downloader.download(urlString) { progress ->
+                    // UI (Compose) obserwuje to repo
+                    DownloadProgressRepository.emitProgress(progress)
+
+                    val now = SystemClock.elapsedRealtime()
+                    val pct = percent(progress)
+                    val shouldNotify = pct != lastNotifPct || (now - lastNotifAt) >= NOTIF_MIN_INTERVAL_MS
+
+                    if (shouldNotify) {
+                        lastNotifPct = pct
+                        lastNotifAt = now
+                        updateNotificationFromProgress(progress)
+                    }
+                }
             } catch (t: Throwable) {
                 Log.e(TAG, "Nieobsłużony błąd pobierania", t)
-                val info = PostepInfo(
-                    mPobranychBajtow = 0,
-                    mRozmiar = 0,
-                    mStatus = PostepInfo.STATUS_ERROR,
-                    mBlad = t.message ?: t::class.java.simpleName
+                val error = DownloadProgress(
+                    downloadedBytes = 0,
+                    totalBytes = 0,
+                    status = DownloadStatus.ERROR,
+                    errorMessage = t.message ?: t::class.java.simpleName
                 )
-                sendProgress(info)
-                updateNotification(0, 0, "Błąd pobierania", contentIntent = null)
+                DownloadProgressRepository.emitProgress(error)
+                updateNotificationFromProgress(error)
             } finally {
                 stopForeground(STOP_FOREGROUND_DETACH)
                 stopSelf(startId)
@@ -92,132 +103,45 @@ class DownloadService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun pobierzPlik(urlString: String) {
-        Log.d(TAG, "Start pobierzPlik, url=$urlString")
-        var connection: HttpURLConnection? = null
+    private fun percent(progress: DownloadProgress): Int {
+        val total = progress.totalBytes
+        return if (total > 0) {
+            ((progress.downloadedBytes.toDouble() / total.toDouble()) * 100).toInt().coerceIn(0, 100)
+        } else 0
+    }
 
-        try {
-            val url = URL(urlString)
-            connection = (url.openConnection() as HttpURLConnection).apply {
-                instanceFollowRedirects = true
-                connectTimeout = 15_000
-                readTimeout = 30_000
-            }
-            connection.connect()
+    private fun updateNotificationFromProgress(progress: DownloadProgress) {
+        val title = when (progress.status) {
+            DownloadStatus.DONE -> "Pobieranie zakończone"
+            DownloadStatus.ERROR -> "Błąd pobierania"
+            DownloadStatus.RUNNING -> "Pobieranie pliku"
+            DownloadStatus.IDLE -> "Pobieranie"
+        }
 
-            val code = connection.responseCode
-            if (code !in 200..299) {
-                throw IllegalStateException("HTTP $code")
-            }
-
-            val mime = connection.contentType?.substringBefore(';')?.trim()
-            val fileLength = connection.contentLengthLong
-
-            val dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: filesDir
-            if (!dir.exists()) dir.mkdirs()
-
-            val filename = buildFileName(urlString, connection.getHeaderField("Content-Disposition"), mime)
-            val outFile = File(dir, filename)
-
-            val info = PostepInfo(
-                mPobranychBajtow = 0,
-                mRozmiar = if (fileLength > 0) fileLength else 0,
-                mStatus = PostepInfo.STATUS_RUNNING,
-                mPlikSciezka = outFile.absolutePath,
-                mBlad = null
-            )
-            sendProgress(info)
-
-            connection.inputStream.use { input ->
-                FileOutputStream(outFile).use { output ->
-                    val buffer = ByteArray(8 * 1024)
-                    var total: Long = 0
-
-                    Log.d(TAG, "Start download: $urlString, size=$fileLength, mime=$mime, out=${outFile.absolutePath}")
-
-                    var lastNotifAt = 0L
-                    var lastNotifPct = -1
-                    var lastUiAt = 0L
-
-                    while (true) {
-                        val read = input.read(buffer)
-                        if (read == -1) break
-                        output.write(buffer, 0, read)
-                        total += read
-
-                        val now = SystemClock.elapsedRealtime()
-                        if ((now - lastUiAt) >= UI_MIN_INTERVAL_MS) {
-                            lastUiAt = now
-                            info.mPobranychBajtow = total
-                            info.mStatus = PostepInfo.STATUS_RUNNING
-                            sendProgress(info)
-                        }
-
-                        val pct = if (fileLength > 0) ((total * 100.0) / fileLength).toInt().coerceIn(0, 100) else 0
-                        val shouldNotify = pct != lastNotifPct || (now - lastNotifAt) >= NOTIF_MIN_INTERVAL_MS
-                        if (shouldNotify) {
-                            lastNotifPct = pct
-                            lastNotifAt = now
-                            updateNotification(total, fileLength, title = "Pobieranie pliku", contentIntent = null)
-                        }
-                    }
-
-                    output.flush()
-                }
-            }
-
-            val finalSize = if (fileLength > 0) fileLength else outFile.length()
-            info.mPobranychBajtow = finalSize
-            info.mRozmiar = finalSize
-
-            if (!outFile.exists() || outFile.length() <= 0L) {
-                info.mStatus = PostepInfo.STATUS_ERROR
-                info.mBlad = "Plik nie został zapisany. Ścieżka: ${outFile.absolutePath}"
-                sendProgress(info)
-                updateNotification(0, 0, "Błąd pobierania", contentIntent = null)
-                Log.e(TAG, info.mBlad ?: "Plik nie został zapisany")
-                return
-            }
-
-            info.mStatus = PostepInfo.STATUS_DONE
-            info.mBlad = null
-            sendProgress(info)
-
-            val openIntent = buildOpenFileIntent(outFile, mime)
-            val pendingOpen = PendingIntent.getActivity(
+        val contentIntent = if (progress.status == DownloadStatus.DONE && !progress.filePath.isNullOrBlank()) {
+            val file = File(progress.filePath)
+            val openIntent = buildOpenFileIntent(file)
+            PendingIntent.getActivity(
                 this,
                 100,
                 openIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-
-            updateNotification(
-                progress = finalSize,
-                total = finalSize,
-                title = "Pobieranie zakończone",
-                contentIntent = pendingOpen
-            )
-
-            Log.d(TAG, "Pobieranie zakończone, zapisano do: ${outFile.absolutePath} (len=${outFile.length()}, mime=$mime)")
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Błąd pobierania", e)
-            val info = PostepInfo(
-                mPobranychBajtow = 0,
-                mRozmiar = 0,
-                mStatus = PostepInfo.STATUS_ERROR,
-                mBlad = e.message ?: e::class.java.simpleName
-            )
-            sendProgress(info)
-            updateNotification(0, 0, "Błąd pobierania", contentIntent = null)
-        } finally {
-            connection?.disconnect()
+        } else {
+            null
         }
+
+        updateNotification(
+            progress = progress.downloadedBytes,
+            total = progress.totalBytes,
+            title = title,
+            contentIntent = contentIntent
+        )
     }
 
-    private fun buildOpenFileIntent(file: File, mime: String?): Intent {
+    private fun buildOpenFileIntent(file: File): Intent {
         val uri: Uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
-        val guessedMime = mime ?: guessMimeFromExtension(file.name)
+        val guessedMime = guessMimeFromExtension(file.name)
 
         return Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, guessedMime)
@@ -237,50 +161,6 @@ class DownloadService : Service() {
             "mp4" -> "video/mp4"
             else -> "application/octet-stream"
         }
-    }
-
-    private fun buildFileName(urlString: String, contentDisposition: String?, mime: String?): String {
-        // 1) Content-Disposition: filename="..." / filename*=UTF-8''...
-        val cd = contentDisposition.orEmpty()
-        val fromCd = Regex(
-            """filename\*=UTF-8''([^;]+)|filename="?([^;"]+)"?""",
-            RegexOption.IGNORE_CASE
-        )
-            .find(cd)
-            ?.let { match ->
-                match.groups[1]?.value ?: match.groups[2]?.value
-            }
-            ?.trim()
-
-        val rawFromUrl = urlString.substringAfterLast('/').substringBefore('?').trim()
-
-        val base = (fromCd?.takeIf { it.isNotBlank() } ?: rawFromUrl).ifBlank {
-            "pobrany_plik_${System.currentTimeMillis()}"
-        }
-
-        val safeBase = base.replace(Regex("[^A-Za-z0-9._-]"), "_")
-
-        // Jeśli już ma rozszerzenie, zostaw.
-        if (safeBase.contains('.') && safeBase.substringAfterLast('.').length in 1..6) {
-            return safeBase
-        }
-
-        // 2) Dopasuj rozszerzenie po mime
-        val ext = when (mime?.lowercase(Locale.US)) {
-            "image/jpeg" -> "jpg"
-            "image/png" -> "png"
-            "image/gif" -> "gif"
-            "application/pdf" -> "pdf"
-            "text/plain" -> "txt"
-            "video/mp4" -> "mp4"
-            else -> "bin"
-        }
-
-        return "$safeBase.$ext"
-    }
-
-    private fun sendProgress(info: PostepInfo) {
-        DownloadRepository.emitProgress(info)
     }
 
     private fun updateNotification(progress: Long, total: Long, title: String = "Pobieranie pliku", contentIntent: PendingIntent?) {
