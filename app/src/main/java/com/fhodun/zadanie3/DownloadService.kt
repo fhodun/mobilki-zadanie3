@@ -13,10 +13,10 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
-import com.fhodun.zadanie3.data.downloader.HttpUrlConnectionDownloader
-import com.fhodun.zadanie3.data.repository.DownloadProgressRepository
-import com.fhodun.zadanie3.domain.model.DownloadProgress
-import com.fhodun.zadanie3.domain.model.DownloadStatus
+import com.fhodun.zadanie3.HttpUrlConnectionDownloader
+import com.fhodun.zadanie3.DownloadProgress
+import com.fhodun.zadanie3.DownloadStatus
+import com.fhodun.zadanie3.DownloadProgressRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -73,7 +73,7 @@ class DownloadService : Service() {
                     DownloadProgressRepository.emitProgress(progress)
 
                     val now = SystemClock.elapsedRealtime()
-                    val pct = percent(progress)
+                    val pct = progress.percent()
                     val shouldNotify = pct != lastNotifPct || (now - lastNotifAt) >= NOTIF_MIN_INTERVAL_MS
 
                     if (shouldNotify) {
@@ -102,13 +102,6 @@ class DownloadService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
-
-    private fun percent(progress: DownloadProgress): Int {
-        val total = progress.totalBytes
-        return if (total > 0) {
-            ((progress.downloadedBytes.toDouble() / total.toDouble()) * 100).toInt().coerceIn(0, 100)
-        } else 0
-    }
 
     private fun updateNotificationFromProgress(progress: DownloadProgress) {
         val title = when (progress.status) {
@@ -170,6 +163,7 @@ class DownloadService : Service() {
     }
 
     private fun buildNotification(progress: Long, total: Long, title: String, contentIntent: PendingIntent?): Notification {
+        // jeżeli total==0 to i tak pokazujemy indeterminate, ale pct niech zostanie spójny z resztą aplikacji
         val pct = if (total > 0) ((progress.toDouble() / total.toDouble()) * 100).toInt() else 0
 
         val fallbackIntent = Intent(this, MainActivity::class.java).apply {

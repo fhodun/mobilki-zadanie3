@@ -1,4 +1,4 @@
-package com.fhodun.zadanie3.domain.model
+package com.fhodun.zadanie3
 
 enum class DownloadStatus {
     IDLE,
@@ -6,4 +6,3 @@ enum class DownloadStatus {
     DONE,
     ERROR
 }
-

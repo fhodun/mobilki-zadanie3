@@ -1,11 +1,8 @@
-package com.fhodun.zadanie3.data.downloader
+package com.fhodun.zadanie3
 
 import android.content.Context
 import android.os.Environment
 import android.os.SystemClock
-import com.fhodun.zadanie3.domain.downloader.Downloader
-import com.fhodun.zadanie3.domain.model.DownloadProgress
-import com.fhodun.zadanie3.domain.model.DownloadStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -174,4 +171,3 @@ class HttpUrlConnectionDownloader(
         }
     }
 }
-
