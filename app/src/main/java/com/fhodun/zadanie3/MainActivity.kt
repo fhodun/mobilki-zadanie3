@@ -38,9 +38,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import com.fhodun.zadanie3.DownloadProgressRepository
-import com.fhodun.zadanie3.FileInfoFetcher
-import com.fhodun.zadanie3.DownloadStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 

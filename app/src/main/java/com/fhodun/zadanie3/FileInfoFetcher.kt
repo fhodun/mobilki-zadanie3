@@ -1,6 +1,5 @@
 package com.fhodun.zadanie3
 
-import com.fhodun.zadanie3.FileInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection

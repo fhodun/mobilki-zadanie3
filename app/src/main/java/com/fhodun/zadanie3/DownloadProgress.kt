@@ -1,7 +1,5 @@
 package com.fhodun.zadanie3
 
-import com.fhodun.zadanie3.DownloadStatus
-
 data class DownloadProgress(
     val downloadedBytes: Long = 0,
     val totalBytes: Long = 0,

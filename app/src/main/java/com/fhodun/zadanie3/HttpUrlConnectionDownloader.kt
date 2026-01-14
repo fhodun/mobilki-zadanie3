@@ -43,7 +43,8 @@ class HttpUrlConnectionDownloader(
             val mime = connection.contentType?.substringBefore(';')?.trim()
             val fileLength = connection.contentLengthLong
 
-            val dir = appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: appContext.filesDir
+            val dir = appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                ?: appContext.filesDir
             if (!dir.exists()) dir.mkdirs()
 
             val filename = buildFileName(
@@ -128,7 +129,11 @@ class HttpUrlConnectionDownloader(
         }
     }
 
-    private fun buildFileName(urlString: String, contentDisposition: String?, mime: String?): String {
+    private fun buildFileName(
+        urlString: String,
+        contentDisposition: String?,
+        mime: String?
+    ): String {
         val fromCd = extractFilenameFromContentDisposition(contentDisposition)
         val rawFromUrl = urlString.substringAfterLast('/').substringBefore('?').trim()
 

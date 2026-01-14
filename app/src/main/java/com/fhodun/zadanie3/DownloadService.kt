@@ -13,10 +13,6 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
-import com.fhodun.zadanie3.HttpUrlConnectionDownloader
-import com.fhodun.zadanie3.DownloadProgress
-import com.fhodun.zadanie3.DownloadStatus
-import com.fhodun.zadanie3.DownloadProgressRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -58,7 +54,12 @@ class DownloadService : Service() {
 
         startForeground(
             NOTIF_ID,
-            buildNotification(progress = 0, total = 0, title = "Rozpoczynam pobieranie", contentIntent = null)
+            buildNotification(
+                progress = 0,
+                total = 0,
+                title = "Rozpoczynam pobieranie",
+                contentIntent = null
+            )
         )
 
         val downloader = HttpUrlConnectionDownloader(appContext = applicationContext)
@@ -74,7 +75,8 @@ class DownloadService : Service() {
 
                     val now = SystemClock.elapsedRealtime()
                     val pct = progress.percent()
-                    val shouldNotify = pct != lastNotifPct || (now - lastNotifAt) >= NOTIF_MIN_INTERVAL_MS
+                    val shouldNotify =
+                        pct != lastNotifPct || (now - lastNotifAt) >= NOTIF_MIN_INTERVAL_MS
 
                     if (shouldNotify) {
                         lastNotifPct = pct
@@ -111,18 +113,19 @@ class DownloadService : Service() {
             DownloadStatus.IDLE -> "Pobieranie"
         }
 
-        val contentIntent = if (progress.status == DownloadStatus.DONE && !progress.filePath.isNullOrBlank()) {
-            val file = File(progress.filePath)
-            val openIntent = buildOpenFileIntent(file)
-            PendingIntent.getActivity(
-                this,
-                100,
-                openIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-        } else {
-            null
-        }
+        val contentIntent =
+            if (progress.status == DownloadStatus.DONE && !progress.filePath.isNullOrBlank()) {
+                val file = File(progress.filePath)
+                val openIntent = buildOpenFileIntent(file)
+                PendingIntent.getActivity(
+                    this,
+                    100,
+                    openIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+            } else {
+                null
+            }
 
         updateNotification(
             progress = progress.downloadedBytes,
@@ -156,13 +159,23 @@ class DownloadService : Service() {
         }
     }
 
-    private fun updateNotification(progress: Long, total: Long, title: String = "Pobieranie pliku", contentIntent: PendingIntent?) {
+    private fun updateNotification(
+        progress: Long,
+        total: Long,
+        title: String = "Pobieranie pliku",
+        contentIntent: PendingIntent?
+    ) {
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         val notif = buildNotification(progress, total, title, contentIntent)
         manager.notify(NOTIF_ID, notif)
     }
 
-    private fun buildNotification(progress: Long, total: Long, title: String, contentIntent: PendingIntent?): Notification {
+    private fun buildNotification(
+        progress: Long,
+        total: Long,
+        title: String,
+        contentIntent: PendingIntent?
+    ): Notification {
         // jeżeli total==0 to i tak pokazujemy indeterminate, ale pct niech zostanie spójny z resztą aplikacji
         val pct = if (total > 0) ((progress.toDouble() / total.toDouble()) * 100).toInt() else 0
 
